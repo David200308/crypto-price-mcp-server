@@ -236,7 +236,132 @@ class CryptoPriceMCPServer {
     await this.server.connect(transport);
     console.error('Crypto Price Checker MCP server running on stdio');
   }
+
+  async runHttp(port: number = 3000) {
+    const fastify = require('fastify')({ logger: true });
+    
+    // Health check endpoint
+    fastify.get('/health', async (request: any, reply: any) => {
+      return { status: 'healthy', service: 'crypto-price-mcp-server' };
+    });
+
+    // MCP endpoint
+    fastify.post('/mcp', async (request: any, reply: any) => {
+      try {
+        const { method, params, id } = request.body;
+        
+        if (method === 'tools/list') {
+          const tools = [
+            {
+              name: 'get_crypto_price',
+              description: 'Get the current price of a cryptocurrency across multiple exchanges (CEX and DEX)',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  symbol: {
+                    type: 'string',
+                    description: 'The cryptocurrency symbol (e.g., BTC, ETH, SOL)',
+                  },
+                },
+                required: ['symbol'],
+              },
+            },
+            {
+              name: 'get_multiple_crypto_prices',
+              description: 'Get prices for multiple cryptocurrencies across all exchanges',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  symbols: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Array of cryptocurrency symbols (e.g., ["BTC", "ETH", "SOL"])',
+                  },
+                },
+                required: ['symbols'],
+              },
+            },
+            {
+              name: 'list_supported_exchanges',
+              description: 'List all supported exchanges (CEX and DEX)',
+              inputSchema: {
+                type: 'object',
+                properties: {},
+              },
+            },
+          ];
+          return reply.send({ jsonrpc: '2.0', id, result: { tools } });
+        }
+        
+        if (method === 'tools/call') {
+          const { name, arguments: args } = params;
+          
+          switch (name) {
+            case 'get_crypto_price': {
+              const { symbol } = args;
+              const result = await this.cryptoChecker.getCryptoPrice(symbol);
+              const formatted = this.formatSinglePriceResult(result);
+              return reply.send({ jsonrpc: '2.0', id, result: formatted });
+            }
+            
+            case 'get_multiple_crypto_prices': {
+              const { symbols } = args;
+              if (!Array.isArray(symbols) || symbols.length === 0) {
+                throw new Error('Symbols array is required and cannot be empty');
+              }
+              const results = await this.cryptoChecker.getMultipleCryptoPrices(symbols);
+              const formatted = this.formatMultiplePriceResults(results);
+              return reply.send({ jsonrpc: '2.0', id, result: formatted });
+            }
+            
+            case 'list_supported_exchanges': {
+              const exchanges = this.cryptoChecker.getSupportedExchanges();
+              const result = {
+                content: [
+                  {
+                    type: 'text',
+                    text: `Supported Exchanges:\n\nCEX (Centralized Exchanges):\n- Binance\n- OKX\n- Coinbase\n- Kraken\n\nDEX (Decentralized Exchanges):\n- Hyperliquid\n- Uniswap\n- 0x Swap\n\nTotal: ${exchanges.length} exchanges`,
+                  },
+                ],
+                isError: false,
+              };
+              return reply.send({ jsonrpc: '2.0', id, result });
+            }
+            
+            default:
+              throw new Error(`Unknown tool: ${name}`);
+          }
+        }
+        
+        reply.code(400).send({ jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } });
+      } catch (error: any) {
+        reply.code(500).send({ 
+          jsonrpc: '2.0', 
+          id: request.body.id, 
+          error: { code: -32603, message: error.message } 
+        });
+      }
+    });
+
+    try {
+      await fastify.listen({ port, host: '0.0.0.0' });
+      console.log(`Crypto Price Checker MCP server running on HTTP port ${port}`);
+      console.log(`Health check: http://localhost:${port}/health`);
+      console.log(`MCP endpoint: http://localhost:${port}/mcp`);
+    } catch (err) {
+      fastify.log.error(err);
+      process.exit(1);
+    }
+  }
 }
 
 const server = new CryptoPriceMCPServer();
-server.run().catch(console.error);
+
+// Check if running in HTTP mode (for deployment)
+if (process.env.NODE_ENV === 'production' || process.env.PORT) {
+  const port = parseInt(process.env.PORT || '3000');
+  server.runHttp(port).catch(console.error);
+} else {
+  // Default stdio mode for local development
+  server.run().catch(console.error);
+}
