@@ -1,42 +1,33 @@
 import axios, { AxiosInstance } from 'axios';
 import { ethers } from 'ethers';
 import { PriceData, ExchangeResult, ExchangeConfig, ChainConfig, TokenInfo } from '../../types';
+import { TokenAddressService } from '../../services/token-address-service';
 
 export class CurveExchange {
   private provider: ethers.JsonRpcProvider;
   private config: ExchangeConfig;
   private chainConfig: ChainConfig;
+  private tokenAddressService: TokenAddressService;
   
   // Curve Finance API base URL
   private readonly CURVE_API_BASE = 'https://api.curve.fi/api';
   
-  // Common token addresses on different chains
-  private readonly TOKEN_ADDRESSES: { [key: number]: { [key: string]: string } } = {
+  // Only keep essential reference tokens for price calculations
+  private readonly REFERENCE_TOKENS: { [key: number]: { [key: string]: string } } = {
     1: { // Ethereum mainnet
-      'WETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-      'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-      'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-      'DAI': '0x6B175474E89094C44Da98b954EedeAC495271d0F',
-      'WBTC': '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
-      'CRV': '0xD533a949740bb3306d119CC777fa900bA034cd52',
-      'LINK': '0x514910771AF9Ca656af840dff83E8264EcF986CA'
+      'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
     },
     137: { // Polygon
-      'WMATIC': '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
-      'USDC': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
-      'USDT': '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
-      'DAI': '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063'
+      'USDC': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'
     },
     42161: { // Arbitrum
-      'WETH': '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-      'USDC': '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-      'USDT': '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
-      'ARB': '0x912CE59144191C1204E64559FE8253a0e49E6548'
+      'USDC': '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
     }
   };
 
   constructor(chainId: number = 1, rpcUrl?: string) {
     this.chainConfig = this.getChainConfig(chainId, rpcUrl);
+    this.tokenAddressService = new TokenAddressService();
     
     this.config = {
       name: 'Curve',
@@ -55,12 +46,12 @@ export class CurveExchange {
       42161: 'https://arbitrum.llamarpc.com' // Arbitrum
     };
     
-    const chainTokens = this.TOKEN_ADDRESSES[chainId] || this.TOKEN_ADDRESSES[1];
+    const chainTokens = this.REFERENCE_TOKENS[chainId] || this.REFERENCE_TOKENS[1];
     
     return {
       chainId,
       rpcUrl: rpcUrl || defaultRpcUrls[chainId] || 'https://eth.llamarpc.com',
-      wethAddress: chainTokens.WETH || chainTokens.WMATIC || chainTokens.WETH,
+      wethAddress: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH on Ethereum
       usdcAddress: chainTokens.USDC
     };
   }
@@ -69,10 +60,27 @@ export class CurveExchange {
     return symbol.toUpperCase();
   }
 
-  private getTokenAddress(symbol: string): string | null {
+  private async getTokenAddress(symbol: string): Promise<string | null> {
     const normalizedSymbol = this.normalizeSymbol(symbol);
-    const chainTokens = this.TOKEN_ADDRESSES[this.chainConfig.chainId] || this.TOKEN_ADDRESSES[1];
-    return chainTokens[normalizedSymbol] || null;
+    
+    // First try the reference tokens (faster)
+    const chainTokens = this.REFERENCE_TOKENS[this.chainConfig.chainId] || this.REFERENCE_TOKENS[1];
+    const referenceAddress = chainTokens[normalizedSymbol];
+    if (referenceAddress) {
+      return referenceAddress;
+    }
+    
+    // If not found, try the token address service for EVM tokens
+    try {
+      const tokenResult = await this.tokenAddressService.getTokenAddress(normalizedSymbol, this.chainConfig.chainId);
+      if (tokenResult.success && tokenResult.data) {
+        return tokenResult.data.address;
+      }
+    } catch (error) {
+      console.warn(`Failed to get token address for ${symbol}:`, error);
+    }
+    
+    return null;
   }
 
   private getChainName(chainId: number): string {
@@ -140,6 +148,18 @@ export class CurveExchange {
         }
       }
       
+      // If no direct pool found, look for pools with WETH as intermediary
+      const wethAddress = this.chainConfig.wethAddress.toLowerCase();
+      for (const pool of pools) {
+        if (pool.coins && pool.coins.length >= 2) {
+          const coinAddresses = pool.coins.map((coin: any) => coin.address?.toLowerCase());
+          if (coinAddresses.includes(tokenAddress.toLowerCase()) && 
+              coinAddresses.includes(wethAddress)) {
+            return pool;
+          }
+        }
+      }
+      
       return null;
     } catch (error) {
       console.error('Error finding Curve pool:', error);
@@ -173,13 +193,12 @@ export class CurveExchange {
       const targetChainId = chainId || this.chainConfig.chainId;
       
       // Get token address
-      const tokenAddress = this.getTokenAddress(symbol);
+      const tokenAddress = await this.getTokenAddress(symbol);
       if (!tokenAddress) {
-        const supportedTokens = Object.keys(this.TOKEN_ADDRESSES[targetChainId] || this.TOKEN_ADDRESSES[1]);
         return {
           exchange: 'Curve',
           success: false,
-          error: `Token ${symbol} not supported on chain ${targetChainId}. Supported tokens: ${supportedTokens.join(', ')}`
+          error: `Token ${symbol} not found on chain ${targetChainId}. Please check if the token exists and is supported.`
         };
       }
 
@@ -193,7 +212,7 @@ export class CurveExchange {
         return {
           exchange: 'Curve',
           success: false,
-          error: `No Curve pool found for ${symbol}/USDC`
+          error: `No Curve pool found for ${symbol}/USDC or ${symbol}/WETH on chain ${targetChainId}. Curve primarily supports stablecoins and similar assets.`
         };
       }
 

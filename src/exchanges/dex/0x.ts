@@ -1,12 +1,14 @@
 import axios, { AxiosInstance } from 'axios';
 import { ethers } from 'ethers';
 import { PriceData, ExchangeResult, ExchangeConfig, ChainConfig, TokenInfo } from '../../types';
+import { TokenAddressService } from '../../services/token-address-service';
 
 export class ZeroXExchange {
   private client: AxiosInstance;
   private provider: ethers.JsonRpcProvider;
   private config: ExchangeConfig;
   private chainConfig: ChainConfig;
+  private tokenAddressService: TokenAddressService;
   
   // 0x Protocol addresses on different chains
   private readonly ZEROX_ADDRESSES: { [key: number]: string } = {
@@ -16,18 +18,14 @@ export class ZeroXExchange {
     10: '0xDef1C0ded9bec7F1a1670819833240f027b25EfF'  // Optimism
   };
   
-  // Common token addresses on Ethereum mainnet
-  private readonly TOKEN_ADDRESSES: { [key: string]: string } = {
-    'WETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-    'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-    'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-    'DAI': '0x6B175474E89094C44Da98b954EedeAC495271d0F',
-    'WBTC': '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
-    'UNI': '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984'
+  // Only keep essential reference tokens for price calculations
+  private readonly REFERENCE_TOKENS: { [key: string]: string } = {
+    'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' // Used as price reference
   };
 
   constructor(chainId: number = 1, rpcUrl?: string) {
     this.chainConfig = this.getChainConfig(chainId, rpcUrl);
+    this.tokenAddressService = new TokenAddressService();
     
     this.config = {
       name: '0x',
@@ -59,8 +57,8 @@ export class ZeroXExchange {
     return {
       chainId,
       rpcUrl: rpcUrl || defaultRpcUrls[chainId] || 'https://eth.llamarpc.com',
-      wethAddress: this.TOKEN_ADDRESSES.WETH,
-      usdcAddress: this.TOKEN_ADDRESSES.USDC
+      wethAddress: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH on Ethereum
+      usdcAddress: this.REFERENCE_TOKENS.USDC
     };
   }
 
@@ -68,9 +66,26 @@ export class ZeroXExchange {
     return symbol.toUpperCase();
   }
 
-  private getTokenAddress(symbol: string): string | null {
+  private async getTokenAddress(symbol: string): Promise<string | null> {
     const normalizedSymbol = this.normalizeSymbol(symbol);
-    return this.TOKEN_ADDRESSES[normalizedSymbol] || null;
+    
+    // First try the reference tokens (faster)
+    const referenceAddress = this.REFERENCE_TOKENS[normalizedSymbol];
+    if (referenceAddress) {
+      return referenceAddress;
+    }
+    
+    // If not found, try the token address service for EVM tokens
+    try {
+      const tokenResult = await this.tokenAddressService.getTokenAddress(normalizedSymbol, this.chainConfig.chainId);
+      if (tokenResult.success && tokenResult.data) {
+        return tokenResult.data.address;
+      }
+    } catch (error) {
+      console.warn(`Failed to get token address for ${symbol}:`, error);
+    }
+    
+    return null;
   }
 
   private async getTokenInfo(address: string): Promise<TokenInfo | null> {
@@ -110,13 +125,18 @@ export class ZeroXExchange {
           sellToken,
           buyToken,
           sellAmount,
-          chainId: chainName
+          chainId: chainName,
+          skipValidation: true
         }
       });
       
       return response.data;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error getting 0x quote:', error);
+      // Check if it's a 404 error and provide better error message
+      if (error.response?.status === 404) {
+        throw new Error(`0x API endpoint not found. This might be due to unsupported chain or token pair. Status: ${error.response.status}, URL: ${error.config?.url}`);
+      }
       throw error;
     }
   }
@@ -154,12 +174,12 @@ export class ZeroXExchange {
       const targetChainId = chainId || this.chainConfig.chainId;
       
       // Get token address
-      const tokenAddress = this.getTokenAddress(symbol);
+      const tokenAddress = await this.getTokenAddress(symbol);
       if (!tokenAddress) {
         return {
           exchange: '0x',
           success: false,
-          error: `Token ${symbol} not supported. Supported tokens: ${Object.keys(this.TOKEN_ADDRESSES).join(', ')}`
+          error: `Token ${symbol} not found on chain ${targetChainId}. Please check if the token exists and is supported.`
         };
       }
 
@@ -190,7 +210,7 @@ export class ZeroXExchange {
         return {
           exchange: '0x',
           success: false,
-          error: 'Invalid quote received from 0x'
+          error: 'Invalid quote received from 0x. The token pair might not be supported or have insufficient liquidity.'
         };
       }
 

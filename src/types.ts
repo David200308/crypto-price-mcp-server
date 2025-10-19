@@ -44,7 +44,6 @@ export type SupportedExchanges =
   | 'uniswap' 
   | '0x'
   | 'jupiter'
-  | 'okx-dex'
   | '1inch'
   | 'pancakeswap'
   | 'curve';

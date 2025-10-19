@@ -8,7 +8,6 @@ import {
   UniswapExchange,
   ZeroXExchange,
   JupiterExchange,
-  OKXDEXExchange,
   OneInchExchange,
   PancakeSwapExchange,
   CurveExchange
@@ -32,9 +31,9 @@ export class CryptoPriceChecker {
     this.exchanges.set('uniswap', new UniswapExchange(chainId));
     this.exchanges.set('0x', new ZeroXExchange(chainId));
     this.exchanges.set('jupiter', new JupiterExchange(101)); // Solana
-    this.exchanges.set('okx-dex', new OKXDEXExchange(chainId));
+    // OKX DEX not implemented yet
     this.exchanges.set('1inch', new OneInchExchange(chainId));
-    this.exchanges.set('pancakeswap', new PancakeSwapExchange(56)); // BSC
+    this.exchanges.set('pancakeswap', new PancakeSwapExchange(chainId)); // Use provided chainId
     this.exchanges.set('curve', new CurveExchange(chainId));
   }
 
@@ -43,7 +42,7 @@ export class CryptoPriceChecker {
     const exchangeNames: SupportedExchanges[] = [
       'binance', 'okx', 'coinbase', 'kraken', 
       'hyperliquid', 'uniswap', '0x', 'jupiter', 
-      'okx-dex', '1inch', 'pancakeswap', 'curve'
+      '1inch', 'pancakeswap', 'curve'
     ];
 
     // Execute all exchange queries in parallel
@@ -59,14 +58,14 @@ export class CryptoPriceChecker {
 
       try {
         // Pass chainId to DEX exchanges
-        if (['uniswap', '0x', 'okx-dex', '1inch', 'curve'].includes(exchangeName)) {
+        if (['uniswap', '0x', '1inch', 'curve'].includes(exchangeName)) {
           return await exchange.getPrice(symbol, chainId || this.chainId);
         } else if (exchangeName === 'jupiter') {
           // Jupiter uses Solana (chainId: 101)
           return await exchange.getPrice(symbol, 101);
         } else if (exchangeName === 'pancakeswap') {
-          // PancakeSwap uses BSC (chainId: 56)
-          return await exchange.getPrice(symbol, 56);
+          // PancakeSwap uses the provided chainId
+          return await exchange.getPrice(symbol, chainId || this.chainId);
         } else {
           return await exchange.getPrice(symbol);
         }

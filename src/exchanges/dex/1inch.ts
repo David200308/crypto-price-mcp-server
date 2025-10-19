@@ -1,51 +1,38 @@
 import axios, { AxiosInstance } from 'axios';
 import { PriceData, ExchangeResult, ExchangeConfig, ChainConfig, TokenInfo } from '../../types';
+import { TokenAddressService } from '../../services/token-address-service';
 
 export class OneInchExchange {
   private client: AxiosInstance;
   private config: ExchangeConfig;
   private chainConfig: ChainConfig;
+  private tokenAddressService: TokenAddressService;
   
   // 1inch API base URL
   private readonly ONEINCH_API_BASE = 'https://api.1inch.io/v5.0';
   
-  // Common token addresses on different chains
-  private readonly TOKEN_ADDRESSES: { [key: number]: { [key: string]: string } } = {
+  // Only keep essential reference tokens for price calculations
+  private readonly REFERENCE_TOKENS: { [key: number]: { [key: string]: string } } = {
     1: { // Ethereum mainnet
-      'WETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-      'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-      'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-      'DAI': '0x6B175474E89094C44Da98b954EedeAC495271d0F',
-      'WBTC': '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599'
+      'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
     },
     56: { // BSC
-      'WBNB': '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
-      'USDC': '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
-      'USDT': '0x55d398326f99059fF775485246999027B3197955',
-      'BUSD': '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56'
+      'USDC': '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d'
     },
     137: { // Polygon
-      'WMATIC': '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
-      'USDC': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
-      'USDT': '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
-      'DAI': '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063'
+      'USDC': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'
     },
     42161: { // Arbitrum
-      'WETH': '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
-      'USDC': '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-      'USDT': '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
-      'ARB': '0x912CE59144191C1204E64559FE8253a0e49E6548'
+      'USDC': '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
     },
     10: { // Optimism
-      'WETH': '0x4200000000000000000000000000000000000006',
-      'USDC': '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
-      'USDT': '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58',
-      'OP': '0x4200000000000000000000000000000000000042'
+      'USDC': '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85'
     }
   };
 
   constructor(chainId: number = 1, rpcUrl?: string) {
     this.chainConfig = this.getChainConfig(chainId, rpcUrl);
+    this.tokenAddressService = new TokenAddressService();
     
     this.config = {
       name: '1inch',
@@ -72,12 +59,12 @@ export class OneInchExchange {
       10: 'https://optimism.llamarpc.com' // Optimism
     };
     
-    const chainTokens = this.TOKEN_ADDRESSES[chainId] || this.TOKEN_ADDRESSES[1];
+    const chainTokens = this.REFERENCE_TOKENS[chainId] || this.REFERENCE_TOKENS[1];
     
     return {
       chainId,
       rpcUrl: rpcUrl || defaultRpcUrls[chainId] || 'https://eth.llamarpc.com',
-      wethAddress: chainTokens.WETH || chainTokens.WBNB || chainTokens.WMATIC || chainTokens.WETH,
+      wethAddress: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH on Ethereum
       usdcAddress: chainTokens.USDC
     };
   }
@@ -86,10 +73,27 @@ export class OneInchExchange {
     return symbol.toUpperCase();
   }
 
-  private getTokenAddress(symbol: string): string | null {
+  private async getTokenAddress(symbol: string): Promise<string | null> {
     const normalizedSymbol = this.normalizeSymbol(symbol);
-    const chainTokens = this.TOKEN_ADDRESSES[this.chainConfig.chainId] || this.TOKEN_ADDRESSES[1];
-    return chainTokens[normalizedSymbol] || null;
+    
+    // First try the reference tokens (faster)
+    const chainTokens = this.REFERENCE_TOKENS[this.chainConfig.chainId] || this.REFERENCE_TOKENS[1];
+    const referenceAddress = chainTokens[normalizedSymbol];
+    if (referenceAddress) {
+      return referenceAddress;
+    }
+    
+    // If not found, try the token address service for EVM tokens
+    try {
+      const tokenResult = await this.tokenAddressService.getTokenAddress(normalizedSymbol, this.chainConfig.chainId);
+      if (tokenResult.success && tokenResult.data) {
+        return tokenResult.data.address;
+      }
+    } catch (error) {
+      console.warn(`Failed to get token address for ${symbol}:`, error);
+    }
+    
+    return null;
   }
 
   private getChainName(chainId: number): string {
@@ -116,8 +120,14 @@ export class OneInchExchange {
       });
       
       return response.data;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error getting 1inch quote:', error);
+      // Check for specific error types
+      if (error.response?.status === 400) {
+        throw new Error(`Bad request to 1inch API. Token pair might not be supported.`);
+      } else if (error.response?.status === 404) {
+        throw new Error(`1inch API endpoint not found for chain ${this.getChainName(this.chainConfig.chainId)}.`);
+      }
       throw error;
     }
   }
@@ -128,13 +138,12 @@ export class OneInchExchange {
       const targetChainId = chainId || this.chainConfig.chainId;
       
       // Get token address
-      const tokenAddress = this.getTokenAddress(symbol);
+      const tokenAddress = await this.getTokenAddress(symbol);
       if (!tokenAddress) {
-        const supportedTokens = Object.keys(this.TOKEN_ADDRESSES[targetChainId] || this.TOKEN_ADDRESSES[1]);
         return {
           exchange: '1inch',
           success: false,
-          error: `Token ${symbol} not supported on chain ${targetChainId}. Supported tokens: ${supportedTokens.join(', ')}`
+          error: `Token ${symbol} not found on chain ${targetChainId}. Please check if the token exists and is supported.`
         };
       }
 
@@ -147,16 +156,42 @@ export class OneInchExchange {
       // Get quote from 1inch API
       const quote = await this.getQuote(tokenAddress, usdcAddress, amount);
       
-      if (!quote || !quote.toTokenAmount || !quote.fromTokenAmount) {
+      if (!quote) {
         return {
           exchange: '1inch',
           success: false,
-          error: 'Invalid quote received from 1inch'
+          error: 'No quote received from 1inch. The token pair might not be supported or have insufficient liquidity.'
+        };
+      }
+
+      // Handle different response formats from 1inch
+      let toTokenAmount: string;
+      let fromTokenAmount: string;
+      
+      if (quote.toTokenAmount && quote.fromTokenAmount) {
+        // Standard format
+        toTokenAmount = quote.toTokenAmount;
+        fromTokenAmount = quote.fromTokenAmount;
+      } else if (quote.dstAmount && quote.srcAmount) {
+        // Alternative format
+        toTokenAmount = quote.dstAmount;
+        fromTokenAmount = quote.srcAmount;
+      } else if (quote.outTokenAmount && quote.inTokenAmount) {
+        // Another alternative format
+        toTokenAmount = quote.outTokenAmount;
+        fromTokenAmount = quote.inTokenAmount;
+      } else {
+        // Log the actual response for debugging
+        console.log('1inch response format:', JSON.stringify(quote, null, 2));
+        return {
+          exchange: '1inch',
+          success: false,
+          error: `Invalid quote format received from 1inch. Expected toTokenAmount/fromTokenAmount, dstAmount/srcAmount, or outTokenAmount/inTokenAmount. Received: ${JSON.stringify(quote)}`
         };
       }
 
       // Calculate price
-      const price = Number(quote.toTokenAmount) / Number(quote.fromTokenAmount);
+      const price = Number(toTokenAmount) / Number(fromTokenAmount);
       
       if (price <= 0) {
         return {

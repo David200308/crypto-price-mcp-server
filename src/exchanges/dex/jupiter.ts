@@ -1,26 +1,25 @@
 import axios, { AxiosInstance } from 'axios';
 import { PriceData, ExchangeResult, ExchangeConfig, ChainConfig, TokenInfo } from '../../types';
+import { TokenAddressService } from '../../services/token-address-service';
 
 export class JupiterExchange {
   private client: AxiosInstance;
   private config: ExchangeConfig;
   private chainConfig: ChainConfig;
+  private tokenAddressService: TokenAddressService;
   
   // Jupiter API base URL
   private readonly JUPITER_API_BASE = 'https://quote-api.jup.ag/v6';
   
-  // Common token addresses on Solana
-  private readonly TOKEN_ADDRESSES: { [key: string]: string } = {
+  // Only keep essential reference tokens for price calculations
+  private readonly REFERENCE_TOKENS: { [key: string]: string } = {
     'SOL': 'So11111111111111111111111111111111111111112', // Wrapped SOL
-    'USDC': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-    'USDT': 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
-    'RAY': '4k3Dyjzvzp8eMUXUXcG23Hob2Qf3SDL6Qe4qECPAMa3',
-    'SRM': 'SRMuApVNdxXokk5GT7XD5cUUgXMBCoAz2LHeuAoKWRt',
-    'ORCA': 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE'
+    'USDC': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' // Used as price reference
   };
 
   constructor(chainId: number = 101, rpcUrl?: string) {
     this.chainConfig = this.getChainConfig(chainId, rpcUrl);
+    this.tokenAddressService = new TokenAddressService();
     
     this.config = {
       name: 'Jupiter',
@@ -48,8 +47,8 @@ export class JupiterExchange {
     return {
       chainId,
       rpcUrl: rpcUrl || defaultRpcUrls[chainId] || 'https://api.mainnet-beta.solana.com',
-      wethAddress: this.TOKEN_ADDRESSES.SOL, // SOL as base token
-      usdcAddress: this.TOKEN_ADDRESSES.USDC
+      wethAddress: this.REFERENCE_TOKENS.SOL, // SOL as base token
+      usdcAddress: this.REFERENCE_TOKENS.USDC
     };
   }
 
@@ -57,9 +56,20 @@ export class JupiterExchange {
     return symbol.toUpperCase();
   }
 
-  private getTokenAddress(symbol: string): string | null {
+  private async getTokenAddress(symbol: string): Promise<string | null> {
     const normalizedSymbol = this.normalizeSymbol(symbol);
-    return this.TOKEN_ADDRESSES[normalizedSymbol] || null;
+    
+    // First try the reference tokens (faster)
+    const referenceAddress = this.REFERENCE_TOKENS[normalizedSymbol];
+    if (referenceAddress) {
+      return referenceAddress;
+    }
+    
+    // For Solana tokens, we need to use a different approach since TokenAddressService is for EVM
+    // For now, return null and let the error handling take care of it
+    // In the future, we could implement a Solana-specific token address service
+    console.warn(`Token ${symbol} not found in reference tokens. Solana token lookup not implemented yet.`);
+    return null;
   }
 
   private async getQuote(inputMint: string, outputMint: string, amount: string): Promise<any> {
@@ -95,12 +105,12 @@ export class JupiterExchange {
       }
       
       // Get token address
-      const tokenAddress = this.getTokenAddress(symbol);
+      const tokenAddress = await this.getTokenAddress(symbol);
       if (!tokenAddress) {
         return {
           exchange: 'Jupiter',
           success: false,
-          error: `Token ${symbol} not supported. Supported tokens: ${Object.keys(this.TOKEN_ADDRESSES).join(', ')}`
+          error: `Token ${symbol} not found on Solana. Please check if the token exists and is supported.`
         };
       }
 

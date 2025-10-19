@@ -317,7 +317,7 @@ class CryptoPriceMCPServer {
       ['binance', 'okx', 'coinbase', 'kraken'].includes(r.exchange.toLowerCase())
     );
     const dexResults = results.filter((r: any) => 
-      ['hyperliquid', 'uniswap', '0x', 'jupiter', 'okx-dex', '1inch', 'pancakeswap', 'curve'].includes(r.exchange.toLowerCase())
+      ['hyperliquid', 'uniswap', '0x', 'jupiter', '1inch', 'pancakeswap', 'curve'].includes(r.exchange.toLowerCase())
     );
 
     if (cexResults.length > 0) {

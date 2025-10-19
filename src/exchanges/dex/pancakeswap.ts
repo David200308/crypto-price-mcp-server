@@ -1,46 +1,37 @@
 import axios, { AxiosInstance } from 'axios';
 import { ethers } from 'ethers';
 import { PriceData, ExchangeResult, ExchangeConfig, ChainConfig, TokenInfo, PoolInfo } from '../../types';
+import { TokenAddressService } from '../../services/token-address-service';
 
 export class PancakeSwapExchange {
   private provider: ethers.JsonRpcProvider;
   private config: ExchangeConfig;
   private chainConfig: ChainConfig;
+  private tokenAddressService: TokenAddressService;
   
   // PancakeSwap V3 Factory contract addresses on different chains
   private readonly PANCAKESWAP_V3_FACTORY: { [key: number]: string } = {
     56: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865', // BSC
-    1: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865', // Ethereum (if deployed)
-    137: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865' // Polygon (if deployed)
+    1: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865', // Ethereum
+    137: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865' // Polygon
   };
   
-  // Common token addresses on different chains
-  private readonly TOKEN_ADDRESSES: { [key: number]: { [key: string]: string } } = {
+  // Only keep essential reference tokens for price calculations
+  private readonly REFERENCE_TOKENS: { [key: number]: { [key: string]: string } } = {
     56: { // BSC
-      'WBNB': '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
-      'USDC': '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
-      'USDT': '0x55d398326f99059fF775485246999027B3197955',
-      'BUSD': '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56',
-      'CAKE': '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82',
-      'ETH': '0x2170Ed0880ac9A755fd29B2688956BD959F933F8'
+      'USDC': '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d'
     },
     1: { // Ethereum
-      'WETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-      'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-      'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-      'DAI': '0x6B175474E89094C44Da98b954EedeAC495271d0F',
-      'WBTC': '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599'
+      'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
     },
     137: { // Polygon
-      'WMATIC': '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
-      'USDC': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
-      'USDT': '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
-      'DAI': '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063'
+      'USDC': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'
     }
   };
 
-  constructor(chainId: number = 56, rpcUrl?: string) {
+  constructor(chainId: number = 1, rpcUrl?: string) {
     this.chainConfig = this.getChainConfig(chainId, rpcUrl);
+    this.tokenAddressService = new TokenAddressService();
     
     this.config = {
       name: 'PancakeSwap',
@@ -59,12 +50,12 @@ export class PancakeSwapExchange {
       137: 'https://polygon.llamarpc.com' // Polygon
     };
     
-    const chainTokens = this.TOKEN_ADDRESSES[chainId] || this.TOKEN_ADDRESSES[56];
+    const chainTokens = this.REFERENCE_TOKENS[chainId] || this.REFERENCE_TOKENS[1];
     
     return {
       chainId,
-      rpcUrl: rpcUrl || defaultRpcUrls[chainId] || 'https://bsc.llamarpc.com',
-      wethAddress: chainTokens.WBNB || chainTokens.WETH || chainTokens.WMATIC || chainTokens.WBNB,
+      rpcUrl: rpcUrl || defaultRpcUrls[chainId] || 'https://eth.llamarpc.com',
+      wethAddress: chainId === 56 ? '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c' : '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WBNB on BSC, WETH on others
       usdcAddress: chainTokens.USDC
     };
   }
@@ -73,10 +64,27 @@ export class PancakeSwapExchange {
     return symbol.toUpperCase();
   }
 
-  private getTokenAddress(symbol: string): string | null {
+  private async getTokenAddress(symbol: string): Promise<string | null> {
     const normalizedSymbol = this.normalizeSymbol(symbol);
-    const chainTokens = this.TOKEN_ADDRESSES[this.chainConfig.chainId] || this.TOKEN_ADDRESSES[56];
-    return chainTokens[normalizedSymbol] || null;
+    
+    // First try the reference tokens (faster)
+    const chainTokens = this.REFERENCE_TOKENS[this.chainConfig.chainId] || this.REFERENCE_TOKENS[1];
+    const referenceAddress = chainTokens[normalizedSymbol];
+    if (referenceAddress) {
+      return referenceAddress;
+    }
+    
+    // If not found, try the token address service for EVM tokens
+    try {
+      const tokenResult = await this.tokenAddressService.getTokenAddress(normalizedSymbol, this.chainConfig.chainId);
+      if (tokenResult.success && tokenResult.data) {
+        return tokenResult.data.address;
+      }
+    } catch (error) {
+      console.warn(`Failed to get token address for ${symbol}:`, error);
+    }
+    
+    return null;
   }
 
   private async getTokenInfo(address: string): Promise<TokenInfo | null> {
@@ -198,13 +206,12 @@ export class PancakeSwapExchange {
       const targetChainId = chainId || this.chainConfig.chainId;
       
       // Get token address
-      const tokenAddress = this.getTokenAddress(symbol);
+      const tokenAddress = await this.getTokenAddress(symbol);
       if (!tokenAddress) {
-        const supportedTokens = Object.keys(this.TOKEN_ADDRESSES[targetChainId] || this.TOKEN_ADDRESSES[56]);
         return {
           exchange: 'PancakeSwap',
           success: false,
-          error: `Token ${symbol} not supported on chain ${targetChainId}. Supported tokens: ${supportedTokens.join(', ')}`
+          error: `Token ${symbol} not found on chain ${targetChainId}. Please check if the token exists and is supported.`
         };
       }
 
@@ -218,7 +225,7 @@ export class PancakeSwapExchange {
         return {
           exchange: 'PancakeSwap',
           success: false,
-          error: `No PancakeSwap V3 pool found for ${symbol}/USDC`
+          error: `No PancakeSwap V3 pool found for ${symbol}/USDC on chain ${targetChainId}. This token might not be supported on this chain.`
         };
       }
 
