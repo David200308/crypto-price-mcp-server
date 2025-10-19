@@ -1,0 +1,31 @@
+{
+  "name": "crypto-price-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP Server for checking cryptocurrency prices across multiple exchanges",
+  "main": "dist/index.js",
+  "packageManager": "pnpm@10.18.3",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "prebuild": "pnpm clean"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.1",
+    "axios": "^1.12.2",
+    "ethers": "^6.15.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.8.1",
+    "@types/ws": "^8.5.12",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=10.0.0"
+  }
+}
