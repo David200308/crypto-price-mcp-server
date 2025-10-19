@@ -15,7 +15,7 @@ class CryptoPriceMCPServer {
   private server: Server;
   private cryptoChecker: CryptoPriceChecker;
 
-  constructor() {
+  constructor(chainId: number = 1) {
     this.server = new Server({
       name: 'crypto-price-checker',
       version: '1.0.0',
@@ -25,7 +25,7 @@ class CryptoPriceMCPServer {
       },
     });
 
-    this.cryptoChecker = new CryptoPriceChecker();
+    this.cryptoChecker = new CryptoPriceChecker(chainId);
     this.setupToolHandlers();
   }
 
@@ -41,6 +41,11 @@ class CryptoPriceMCPServer {
               symbol: {
                 type: 'string',
                 description: 'The cryptocurrency symbol (e.g., BTC, ETH, SOL)',
+              },
+              chainId: {
+                type: 'number',
+                description: 'The blockchain chain ID (default: 1 for Ethereum mainnet)',
+                default: 1,
               },
             },
             required: ['symbol'],
@@ -58,6 +63,11 @@ class CryptoPriceMCPServer {
                   type: 'string',
                 },
                 description: 'Array of cryptocurrency symbols (e.g., ["BTC", "ETH", "SOL"])',
+              },
+              chainId: {
+                type: 'number',
+                description: 'The blockchain chain ID (default: 1 for Ethereum mainnet)',
+                default: 1,
               },
             },
             required: ['symbols'],
@@ -82,17 +92,17 @@ class CryptoPriceMCPServer {
       try {
         switch (name) {
           case 'get_crypto_price': {
-            const { symbol } = args as { symbol: string };
-            const result = await this.cryptoChecker.getCryptoPrice(symbol);
+            const { symbol, chainId } = args as { symbol: string; chainId?: number };
+            const result = await this.cryptoChecker.getCryptoPrice(symbol, chainId);
             return this.formatSinglePriceResult(result);
           }
 
           case 'get_multiple_crypto_prices': {
-            const { symbols } = args as { symbols: string[] };
+            const { symbols, chainId } = args as { symbols: string[]; chainId?: number };
             if (!Array.isArray(symbols) || symbols.length === 0) {
               throw new Error('Symbols array is required and cannot be empty');
             }
-            const results = await this.cryptoChecker.getMultipleCryptoPrices(symbols);
+            const results = await this.cryptoChecker.getMultipleCryptoPrices(symbols, chainId);
             return this.formatMultiplePriceResults(results);
           }
 
@@ -102,7 +112,7 @@ class CryptoPriceMCPServer {
               content: [
                 {
                   type: 'text',
-                  text: `Supported Exchanges:\n\nCEX (Centralized Exchanges):\n- Binance\n- OKX\n- Coinbase\n- Kraken\n\nDEX (Decentralized Exchanges):\n- Hyperliquid\n- Uniswap\n- 0x Swap\n\nTotal: ${exchanges.length} exchanges`,
+                  text: `Supported Exchanges:\n\nCEX (Centralized Exchanges):\n- Binance\n- OKX\n- Coinbase\n- Kraken\n\nDEX (Decentralized Exchanges):\n- Hyperliquid\n- Uniswap\n- 0x Swap\n- Jupiter (Solana)\n- OKX DEX\n- 1inch\n- PancakeSwap (BSC)\n- Curve Finance\n\nTotal: ${exchanges.length} exchanges`,
                 },
               ],
               isError: false,
@@ -150,7 +160,7 @@ class CryptoPriceMCPServer {
       ['binance', 'okx', 'coinbase', 'kraken'].includes(r.exchange.toLowerCase())
     );
     const dexResults = results.filter((r: any) => 
-      ['hyperliquid', 'uniswap', '0x'].includes(r.exchange.toLowerCase())
+      ['hyperliquid', 'uniswap', '0x', 'jupiter', 'okx-dex', '1inch', 'pancakeswap', 'curve'].includes(r.exchange.toLowerCase())
     );
 
     if (cexResults.length > 0) {
@@ -262,6 +272,11 @@ class CryptoPriceMCPServer {
                     type: 'string',
                     description: 'The cryptocurrency symbol (e.g., BTC, ETH, SOL)',
                   },
+                  chainId: {
+                    type: 'number',
+                    description: 'The blockchain chain ID (default: 1 for Ethereum mainnet)',
+                    default: 1,
+                  },
                 },
                 required: ['symbol'],
               },
@@ -276,6 +291,11 @@ class CryptoPriceMCPServer {
                     type: 'array',
                     items: { type: 'string' },
                     description: 'Array of cryptocurrency symbols (e.g., ["BTC", "ETH", "SOL"])',
+                  },
+                  chainId: {
+                    type: 'number',
+                    description: 'The blockchain chain ID (default: 1 for Ethereum mainnet)',
+                    default: 1,
                   },
                 },
                 required: ['symbols'],
@@ -298,18 +318,18 @@ class CryptoPriceMCPServer {
           
           switch (name) {
             case 'get_crypto_price': {
-              const { symbol } = args;
-              const result = await this.cryptoChecker.getCryptoPrice(symbol);
+              const { symbol, chainId } = args;
+              const result = await this.cryptoChecker.getCryptoPrice(symbol, chainId);
               const formatted = this.formatSinglePriceResult(result);
               return reply.send({ jsonrpc: '2.0', id, result: formatted });
             }
             
             case 'get_multiple_crypto_prices': {
-              const { symbols } = args;
+              const { symbols, chainId } = args;
               if (!Array.isArray(symbols) || symbols.length === 0) {
                 throw new Error('Symbols array is required and cannot be empty');
               }
-              const results = await this.cryptoChecker.getMultipleCryptoPrices(symbols);
+              const results = await this.cryptoChecker.getMultipleCryptoPrices(symbols, chainId);
               const formatted = this.formatMultiplePriceResults(results);
               return reply.send({ jsonrpc: '2.0', id, result: formatted });
             }
@@ -320,7 +340,7 @@ class CryptoPriceMCPServer {
                 content: [
                   {
                     type: 'text',
-                    text: `Supported Exchanges:\n\nCEX (Centralized Exchanges):\n- Binance\n- OKX\n- Coinbase\n- Kraken\n\nDEX (Decentralized Exchanges):\n- Hyperliquid\n- Uniswap\n- 0x Swap\n\nTotal: ${exchanges.length} exchanges`,
+                    text: `Supported Exchanges:\n\nCEX (Centralized Exchanges):\n- Binance\n- OKX\n- Coinbase\n- Kraken\n\nDEX (Decentralized Exchanges):\n- Hyperliquid\n- Uniswap\n- 0x Swap\n- Jupiter (Solana)\n- OKX DEX\n- 1inch\n- PancakeSwap (BSC)\n- Curve Finance\n\nTotal: ${exchanges.length} exchanges`,
                   },
                 ],
                 isError: false,

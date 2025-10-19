@@ -6,30 +6,44 @@ import {
   KrakenExchange,
   HyperliquidExchange,
   UniswapExchange,
-  ZeroXExchange
+  ZeroXExchange,
+  JupiterExchange,
+  OKXDEXExchange,
+  OneInchExchange,
+  PancakeSwapExchange,
+  CurveExchange
 } from './exchanges';
 
 export class CryptoPriceChecker {
   private exchanges: Map<SupportedExchanges, any> = new Map();
+  private chainId: number;
 
-  constructor() {
+  constructor(chainId: number = 1) {
+    this.chainId = chainId;
+    
     // Initialize CEX exchanges
     this.exchanges.set('binance', new BinanceExchange());
     this.exchanges.set('okx', new OKXExchange());
     this.exchanges.set('coinbase', new CoinbaseExchange());
     this.exchanges.set('kraken', new KrakenExchange());
     
-    // Initialize DEX exchanges
+    // Initialize DEX exchanges with chainId
     this.exchanges.set('hyperliquid', new HyperliquidExchange());
-    this.exchanges.set('uniswap', new UniswapExchange());
-    this.exchanges.set('0x', new ZeroXExchange());
+    this.exchanges.set('uniswap', new UniswapExchange(chainId));
+    this.exchanges.set('0x', new ZeroXExchange(chainId));
+    this.exchanges.set('jupiter', new JupiterExchange(101)); // Solana
+    this.exchanges.set('okx-dex', new OKXDEXExchange(chainId));
+    this.exchanges.set('1inch', new OneInchExchange(chainId));
+    this.exchanges.set('pancakeswap', new PancakeSwapExchange(56)); // BSC
+    this.exchanges.set('curve', new CurveExchange(chainId));
   }
 
-  async getCryptoPrice(symbol: string): Promise<CryptoPriceResult> {
+  async getCryptoPrice(symbol: string, chainId?: number): Promise<CryptoPriceResult> {
     const results: ExchangeResult[] = [];
     const exchangeNames: SupportedExchanges[] = [
       'binance', 'okx', 'coinbase', 'kraken', 
-      'hyperliquid', 'uniswap', '0x'
+      'hyperliquid', 'uniswap', '0x', 'jupiter', 
+      'okx-dex', '1inch', 'pancakeswap', 'curve'
     ];
 
     // Execute all exchange queries in parallel
@@ -44,7 +58,18 @@ export class CryptoPriceChecker {
       }
 
       try {
-        return await exchange.getPrice(symbol);
+        // Pass chainId to DEX exchanges
+        if (['uniswap', '0x', 'okx-dex', '1inch', 'curve'].includes(exchangeName)) {
+          return await exchange.getPrice(symbol, chainId || this.chainId);
+        } else if (exchangeName === 'jupiter') {
+          // Jupiter uses Solana (chainId: 101)
+          return await exchange.getPrice(symbol, 101);
+        } else if (exchangeName === 'pancakeswap') {
+          // PancakeSwap uses BSC (chainId: 56)
+          return await exchange.getPrice(symbol, 56);
+        } else {
+          return await exchange.getPrice(symbol);
+        }
       } catch (error: any) {
         return {
           exchange: exchangeName,
@@ -91,8 +116,8 @@ export class CryptoPriceChecker {
     };
   }
 
-  async getMultipleCryptoPrices(symbols: string[]): Promise<CryptoPriceResult[]> {
-    const promises = symbols.map(symbol => this.getCryptoPrice(symbol));
+  async getMultipleCryptoPrices(symbols: string[], chainId?: number): Promise<CryptoPriceResult[]> {
+    const promises = symbols.map(symbol => this.getCryptoPrice(symbol, chainId));
     return Promise.all(promises);
   }
 

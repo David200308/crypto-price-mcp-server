@@ -1,10 +1,8 @@
 version: '3.8'
 
 services:
-  crypto-price-mcp:
-    image: crypto-price-mcp-server:latest
-    container_name: crypto-price-mcp-server
-    restart: unless-stopped
+  crypto-price-mcp-server:
+    build: .
     ports:
       - "3100:3100"
     environment:
@@ -16,12 +14,4 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    # Security options
-    security_opt:
-      - no-new-privileges:true
-    # Logging
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    restart: unless-stopped

@@ -1,30 +1,49 @@
+import axios, { AxiosInstance } from 'axios';
 import { ethers } from 'ethers';
 import { PriceData, ExchangeResult, ExchangeConfig, ChainConfig, TokenInfo, PoolInfo } from '../../types';
 
-export class UniswapExchange {
+export class PancakeSwapExchange {
   private provider: ethers.JsonRpcProvider;
   private config: ExchangeConfig;
   private chainConfig: ChainConfig;
   
-  // Uniswap V3 Factory contract address on Ethereum mainnet
-  private readonly UNISWAP_V3_FACTORY = '0x1F98431c8aD98523631AE4a59f267346ea31F984';
-  private readonly UNISWAP_V2_FACTORY = '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f';
-  
-  // Common token addresses on Ethereum mainnet
-  private readonly TOKEN_ADDRESSES: { [key: string]: string } = {
-    'WETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-    'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-    'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-    'DAI': '0x6B175474E89094C44Da98b954EedeAC495271d0F',
-    'WBTC': '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
-    'UNI': '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984'
+  // PancakeSwap V3 Factory contract addresses on different chains
+  private readonly PANCAKESWAP_V3_FACTORY: { [key: number]: string } = {
+    56: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865', // BSC
+    1: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865', // Ethereum (if deployed)
+    137: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865' // Polygon (if deployed)
   };
   
-  constructor(chainId: number = 1, rpcUrl?: string) {
+  // Common token addresses on different chains
+  private readonly TOKEN_ADDRESSES: { [key: number]: { [key: string]: string } } = {
+    56: { // BSC
+      'WBNB': '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
+      'USDC': '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
+      'USDT': '0x55d398326f99059fF775485246999027B3197955',
+      'BUSD': '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56',
+      'CAKE': '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82',
+      'ETH': '0x2170Ed0880ac9A755fd29B2688956BD959F933F8'
+    },
+    1: { // Ethereum
+      'WETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+      'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+      'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+      'DAI': '0x6B175474E89094C44Da98b954EedeAC495271d0F',
+      'WBTC': '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599'
+    },
+    137: { // Polygon
+      'WMATIC': '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
+      'USDC': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+      'USDT': '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+      'DAI': '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063'
+    }
+  };
+
+  constructor(chainId: number = 56, rpcUrl?: string) {
     this.chainConfig = this.getChainConfig(chainId, rpcUrl);
     
     this.config = {
-      name: 'Uniswap',
+      name: 'PancakeSwap',
       baseUrl: this.chainConfig.rpcUrl,
       timeout: 10000,
       rateLimit: 100
@@ -35,19 +54,18 @@ export class UniswapExchange {
   
   private getChainConfig(chainId: number, rpcUrl?: string): ChainConfig {
     const defaultRpcUrls: { [key: number]: string } = {
-      1: 'https://eth.llamarpc.com', // Ethereum mainnet
-      137: 'https://polygon.llamarpc.com', // Polygon
-      42161: 'https://arbitrum.llamarpc.com', // Arbitrum
-      10: 'https://optimism.llamarpc.com' // Optimism
+      56: 'https://bsc.llamarpc.com', // BSC
+      1: 'https://eth.llamarpc.com', // Ethereum
+      137: 'https://polygon.llamarpc.com' // Polygon
     };
+    
+    const chainTokens = this.TOKEN_ADDRESSES[chainId] || this.TOKEN_ADDRESSES[56];
     
     return {
       chainId,
-      rpcUrl: rpcUrl || defaultRpcUrls[chainId] || 'https://eth.llamarpc.com',
-      uniswapV3Factory: chainId === 1 ? this.UNISWAP_V3_FACTORY : undefined,
-      uniswapV2Factory: chainId === 1 ? this.UNISWAP_V2_FACTORY : undefined,
-      wethAddress: this.TOKEN_ADDRESSES.WETH,
-      usdcAddress: this.TOKEN_ADDRESSES.USDC
+      rpcUrl: rpcUrl || defaultRpcUrls[chainId] || 'https://bsc.llamarpc.com',
+      wethAddress: chainTokens.WBNB || chainTokens.WETH || chainTokens.WMATIC || chainTokens.WBNB,
+      usdcAddress: chainTokens.USDC
     };
   }
 
@@ -57,7 +75,8 @@ export class UniswapExchange {
 
   private getTokenAddress(symbol: string): string | null {
     const normalizedSymbol = this.normalizeSymbol(symbol);
-    return this.TOKEN_ADDRESSES[normalizedSymbol] || null;
+    const chainTokens = this.TOKEN_ADDRESSES[this.chainConfig.chainId] || this.TOKEN_ADDRESSES[56];
+    return chainTokens[normalizedSymbol] || null;
   }
 
   private async getTokenInfo(address: string): Promise<TokenInfo | null> {
@@ -89,30 +108,31 @@ export class UniswapExchange {
     }
   }
 
-  private async findUniswapV3Pool(token0Address: string, token1Address: string, fee: number = 3000): Promise<string | null> {
+  private async findPancakeSwapV3Pool(token0Address: string, token1Address: string, fee: number = 500): Promise<string | null> {
     try {
-      if (!this.chainConfig.uniswapV3Factory) {
+      const factoryAddress = this.PANCAKESWAP_V3_FACTORY[this.chainConfig.chainId];
+      if (!factoryAddress) {
         return null;
       }
 
-      // Uniswap V3 Factory ABI
+      // PancakeSwap V3 Factory ABI (same as Uniswap V3)
       const factoryAbi = [
         'function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)'
       ];
       
-      const factoryContract = new ethers.Contract(this.chainConfig.uniswapV3Factory, factoryAbi, this.provider);
+      const factoryContract = new ethers.Contract(factoryAddress, factoryAbi, this.provider);
       const poolAddress = await factoryContract.getPool(token0Address, token1Address, fee);
       
       return poolAddress !== ethers.ZeroAddress ? poolAddress : null;
     } catch (error) {
-      console.error('Error finding Uniswap V3 pool:', error);
+      console.error('Error finding PancakeSwap V3 pool:', error);
       return null;
     }
   }
 
   private async getPoolInfo(poolAddress: string): Promise<PoolInfo | null> {
     try {
-      // Uniswap V3 Pool ABI
+      // PancakeSwap V3 Pool ABI (same as Uniswap V3)
       const poolAbi = [
         'function token0() view returns (address)',
         'function token1() view returns (address)',
@@ -180,24 +200,25 @@ export class UniswapExchange {
       // Get token address
       const tokenAddress = this.getTokenAddress(symbol);
       if (!tokenAddress) {
+        const supportedTokens = Object.keys(this.TOKEN_ADDRESSES[targetChainId] || this.TOKEN_ADDRESSES[56]);
         return {
-          exchange: 'Uniswap',
+          exchange: 'PancakeSwap',
           success: false,
-          error: `Token ${symbol} not supported. Supported tokens: ${Object.keys(this.TOKEN_ADDRESSES).join(', ')}`
+          error: `Token ${symbol} not supported on chain ${targetChainId}. Supported tokens: ${supportedTokens.join(', ')}`
         };
       }
 
       // Get USDC address for price reference
       const usdcAddress = this.chainConfig.usdcAddress;
       
-      // Try to find Uniswap V3 pool (token/USDC with 0.3% fee)
-      const poolAddress = await this.findUniswapV3Pool(tokenAddress, usdcAddress, 3000);
+      // Try to find PancakeSwap V3 pool (token/USDC with 0.05% fee)
+      const poolAddress = await this.findPancakeSwapV3Pool(tokenAddress, usdcAddress, 500);
       
       if (!poolAddress) {
         return {
-          exchange: 'Uniswap',
+          exchange: 'PancakeSwap',
           success: false,
-          error: `No Uniswap V3 pool found for ${symbol}/USDC`
+          error: `No PancakeSwap V3 pool found for ${symbol}/USDC`
         };
       }
 
@@ -205,7 +226,7 @@ export class UniswapExchange {
       const poolInfo = await this.getPoolInfo(poolAddress);
       if (!poolInfo) {
         return {
-          exchange: 'Uniswap',
+          exchange: 'PancakeSwap',
           success: false,
           error: 'Failed to get pool information'
         };
@@ -229,14 +250,14 @@ export class UniswapExchange {
         price = isToken0 ? rawPrice : 1 / rawPrice;
       } else {
         return {
-          exchange: 'Uniswap',
+          exchange: 'PancakeSwap',
           success: false,
           error: 'Price calculation not available'
         };
       }
 
       const data: PriceData = {
-        exchange: 'Uniswap',
+        exchange: 'PancakeSwap',
         symbol: symbol.toUpperCase(),
         price,
         timestamp: Date.now(),
@@ -246,13 +267,13 @@ export class UniswapExchange {
       };
 
       return {
-        exchange: 'Uniswap',
+        exchange: 'PancakeSwap',
         success: true,
         data
       };
     } catch (error: any) {
       return {
-        exchange: 'Uniswap',
+        exchange: 'PancakeSwap',
         success: false,
         error: error.message || 'Unknown error'
       };

@@ -6,6 +6,9 @@ export interface PriceData {
   volume24h?: number;
   change24h?: number;
   error?: string;
+  chainId?: number;
+  poolAddress?: string;
+  liquidity?: string;
 }
 
 export interface ExchangeResult {
@@ -39,11 +42,41 @@ export type SupportedExchanges =
   | 'kraken' 
   | 'hyperliquid' 
   | 'uniswap' 
-  | '0x';
+  | '0x'
+  | 'jupiter'
+  | 'okx-dex'
+  | '1inch'
+  | 'pancakeswap'
+  | 'curve';
 
 export interface UniswapToken {
   id: string;
   symbol: string;
   name: string;
   decimals: number;
+}
+
+export interface TokenInfo {
+  address: string;
+  symbol: string;
+  decimals: number;
+  name?: string;
+}
+
+export interface PoolInfo {
+  address: string;
+  token0: TokenInfo;
+  token1: TokenInfo;
+  fee: number;
+  liquidity: string;
+  sqrtPriceX96?: string;
+}
+
+export interface ChainConfig {
+  chainId: number;
+  rpcUrl: string;
+  uniswapV2Factory?: string;
+  uniswapV3Factory?: string;
+  wethAddress: string;
+  usdcAddress: string;
 }
