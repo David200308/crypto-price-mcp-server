@@ -13,6 +13,11 @@ dist/
 .env.test.local
 .env.production.local
 
+# Configuration files (keep example files)
+mcp-config.json
+.mcp-config.json
+config/mcp.json
+
 # Logs
 logs
 *.log

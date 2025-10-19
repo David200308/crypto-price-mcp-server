@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "crypto-price-mcp-server": {
+      "command": "node",
+      "args": [
+        "/....../crypto-price-mcp-server/dist/index.js"
+      ],
+      "cwd": "/....../crypto-price-mcp-server",
+      "env": {
+        "MCP_CONFIG_PATH": "/....../.cursor/mcp.json"
+      },
+      "resend": {
+        "apiKey": "",
+        "fromEmail": "",
+        "fromName": "Crypto Price MCP Server"
+      }
+    }
+  }
+}

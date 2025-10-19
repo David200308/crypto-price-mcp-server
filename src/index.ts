@@ -10,10 +10,12 @@ import {
   ListToolsResult,
 } from '@modelcontextprotocol/sdk/types.js';
 import { CryptoPriceChecker } from './crypto-checker.js';
+import { EmailService } from './email-service.js';
 
 class CryptoPriceMCPServer {
   private server: Server;
   private cryptoChecker: CryptoPriceChecker;
+  private emailService: EmailService;
 
   constructor(chainId: number = 1) {
     this.server = new Server({
@@ -26,6 +28,7 @@ class CryptoPriceMCPServer {
     });
 
     this.cryptoChecker = new CryptoPriceChecker(chainId);
+    this.emailService = new EmailService();
     this.setupToolHandlers();
   }
 
@@ -81,6 +84,74 @@ class CryptoPriceMCPServer {
             properties: {},
           },
         },
+        {
+          name: 'send_email',
+          description: 'Send an email using Resend API',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              to: {
+                type: 'string',
+                description: 'Recipient email address or comma-separated list of addresses',
+              },
+              subject: {
+                type: 'string',
+                description: 'Email subject line',
+              },
+              html: {
+                type: 'string',
+                description: 'HTML content of the email (optional if text is provided)',
+              },
+              text: {
+                type: 'string',
+                description: 'Plain text content of the email (optional if html is provided)',
+              },
+              cc: {
+                type: 'string',
+                description: 'CC email address or comma-separated list (optional)',
+              },
+              bcc: {
+                type: 'string',
+                description: 'BCC email address or comma-separated list (optional)',
+              },
+              replyTo: {
+                type: 'string',
+                description: 'Reply-to email address (optional)',
+              },
+            },
+            required: ['to', 'subject'],
+          },
+        },
+        {
+          name: 'send_crypto_price_alert',
+          description: 'Send a formatted crypto price alert email',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              to: {
+                type: 'string',
+                description: 'Recipient email address or comma-separated list of addresses',
+              },
+              symbol: {
+                type: 'string',
+                description: 'Cryptocurrency symbol (e.g., BTC, ETH)',
+              },
+              price: {
+                type: 'number',
+                description: 'Current price of the cryptocurrency',
+              },
+              exchange: {
+                type: 'string',
+                description: 'Exchange name where the price was obtained',
+              },
+              additionalInfo: {
+                type: 'string',
+                description: 'Additional information to include in the alert (optional)',
+              },
+            },
+            required: ['to', 'symbol', 'price', 'exchange'],
+          },
+        },
       ];
 
       return { tools };
@@ -117,6 +188,92 @@ class CryptoPriceMCPServer {
               ],
               isError: false,
             };
+          }
+
+          case 'send_email': {
+            const { to, subject, html, text, cc, bcc, replyTo } = args as {
+              to: string;
+              subject: string;
+              html?: string;
+              text?: string;
+              cc?: string;
+              bcc?: string;
+              replyTo?: string;
+            };
+
+            if (!this.emailService.isConfigured()) {
+              throw new Error('Email service is not configured. Please set up Resend API key in MCP config file.');
+            }
+
+            // Parse comma-separated email addresses
+            const parseEmails = (emailStr: string) => 
+              emailStr.split(',').map(email => email.trim()).filter(email => email.length > 0);
+
+            const emailRequest = {
+              to: parseEmails(to),
+              subject,
+              html,
+              text,
+              cc: cc ? parseEmails(cc) : undefined,
+              bcc: bcc ? parseEmails(bcc) : undefined,
+              replyTo,
+            };
+
+            const result = await this.emailService.sendEmail(emailRequest);
+            
+            if (result.success) {
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: `✅ Email sent successfully!\nMessage ID: ${result.messageId}`,
+                  },
+                ],
+                isError: false,
+              };
+            } else {
+              throw new Error(`Failed to send email: ${result.error}`);
+            }
+          }
+
+          case 'send_crypto_price_alert': {
+            const { to, symbol, price, exchange, additionalInfo } = args as {
+              to: string;
+              symbol: string;
+              price: number;
+              exchange: string;
+              additionalInfo?: string;
+            };
+
+            if (!this.emailService.isConfigured()) {
+              throw new Error('Email service is not configured. Please set up Resend API key in MCP config file.');
+            }
+
+            // Parse comma-separated email addresses
+            const parseEmails = (emailStr: string) => 
+              emailStr.split(',').map(email => email.trim()).filter(email => email.length > 0);
+
+            const result = await this.emailService.sendCryptoPriceAlert(
+              parseEmails(to),
+              symbol,
+              price,
+              exchange,
+              additionalInfo
+            );
+            
+            if (result.success) {
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: `✅ Crypto price alert sent successfully!\nMessage ID: ${result.messageId}\n\nAlert Details:\n- Symbol: ${symbol}\n- Price: $${price.toFixed(2)}\n- Exchange: ${exchange}\n- Recipients: ${to}`,
+                  },
+                ],
+                isError: false,
+              };
+            } else {
+              throw new Error(`Failed to send crypto price alert: ${result.error}`);
+            }
           }
 
           default:
@@ -309,6 +466,74 @@ class CryptoPriceMCPServer {
                 properties: {},
               },
             },
+            {
+              name: 'send_email',
+              description: 'Send an email using Resend API',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  to: {
+                    type: 'string',
+                    description: 'Recipient email address or comma-separated list of addresses',
+                  },
+                  subject: {
+                    type: 'string',
+                    description: 'Email subject line',
+                  },
+                  html: {
+                    type: 'string',
+                    description: 'HTML content of the email (optional if text is provided)',
+                  },
+                  text: {
+                    type: 'string',
+                    description: 'Plain text content of the email (optional if html is provided)',
+                  },
+                  cc: {
+                    type: 'string',
+                    description: 'CC email address or comma-separated list (optional)',
+                  },
+                  bcc: {
+                    type: 'string',
+                    description: 'BCC email address or comma-separated list (optional)',
+                  },
+                  replyTo: {
+                    type: 'string',
+                    description: 'Reply-to email address (optional)',
+                  },
+                },
+                required: ['to', 'subject'],
+              },
+            },
+            {
+              name: 'send_crypto_price_alert',
+              description: 'Send a formatted crypto price alert email',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  to: {
+                    type: 'string',
+                    description: 'Recipient email address or comma-separated list of addresses',
+                  },
+                  symbol: {
+                    type: 'string',
+                    description: 'Cryptocurrency symbol (e.g., BTC, ETH)',
+                  },
+                  price: {
+                    type: 'number',
+                    description: 'Current price of the cryptocurrency',
+                  },
+                  exchange: {
+                    type: 'string',
+                    description: 'Exchange name where the price was obtained',
+                  },
+                  additionalInfo: {
+                    type: 'string',
+                    description: 'Additional information to include in the alert (optional)',
+                  },
+                },
+                required: ['to', 'symbol', 'price', 'exchange'],
+              },
+            },
           ];
           return reply.send({ jsonrpc: '2.0', id, result: { tools } });
         }
@@ -346,6 +571,80 @@ class CryptoPriceMCPServer {
                 isError: false,
               };
               return reply.send({ jsonrpc: '2.0', id, result });
+            }
+            
+            case 'send_email': {
+              const { to, subject, html, text, cc, bcc, replyTo } = args;
+              
+              if (!this.emailService.isConfigured()) {
+                throw new Error('Email service is not configured. Please set up Resend API key in MCP config file.');
+              }
+
+              // Parse comma-separated email addresses
+              const parseEmails = (emailStr: string) => 
+                emailStr.split(',').map(email => email.trim()).filter(email => email.length > 0);
+
+              const emailRequest = {
+                to: parseEmails(to),
+                subject,
+                html,
+                text,
+                cc: cc ? parseEmails(cc) : undefined,
+                bcc: bcc ? parseEmails(bcc) : undefined,
+                replyTo,
+              };
+
+              const result = await this.emailService.sendEmail(emailRequest);
+              
+              if (result.success) {
+                const response = {
+                  content: [
+                    {
+                      type: 'text',
+                      text: `✅ Email sent successfully!\nMessage ID: ${result.messageId}`,
+                    },
+                  ],
+                  isError: false,
+                };
+                return reply.send({ jsonrpc: '2.0', id, result: response });
+              } else {
+                throw new Error(`Failed to send email: ${result.error}`);
+              }
+            }
+            
+            case 'send_crypto_price_alert': {
+              const { to, symbol, price, exchange, additionalInfo } = args;
+              
+              if (!this.emailService.isConfigured()) {
+                throw new Error('Email service is not configured. Please set up Resend API key in MCP config file.');
+              }
+
+              // Parse comma-separated email addresses
+              const parseEmails = (emailStr: string) => 
+                emailStr.split(',').map(email => email.trim()).filter(email => email.length > 0);
+
+              const result = await this.emailService.sendCryptoPriceAlert(
+                parseEmails(to),
+                symbol,
+                price,
+                exchange,
+                additionalInfo
+              );
+              
+              if (result.success) {
+                const response = {
+                  content: [
+                    {
+                      type: 'text',
+                      text: `✅ Crypto price alert sent successfully!\nMessage ID: ${result.messageId}\n\nAlert Details:\n- Symbol: ${symbol}\n- Price: $${price.toFixed(2)}\n- Exchange: ${exchange}\n- Recipients: ${to}`,
+                    },
+                  ],
+                  isError: false,
+                };
+                return reply.send({ jsonrpc: '2.0', id, result: response });
+              } else {
+                throw new Error(`Failed to send crypto price alert: ${result.error}`);
+              }
             }
             
             default:

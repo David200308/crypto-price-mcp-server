@@ -80,3 +80,25 @@ export interface ChainConfig {
   wethAddress: string;
   usdcAddress: string;
 }
+
+export interface EmailConfig {
+  apiKey: string;
+  fromEmail: string;
+  fromName?: string;
+}
+
+export interface EmailRequest {
+  to: string | string[];
+  subject: string;
+  html?: string;
+  text?: string;
+  cc?: string | string[];
+  bcc?: string | string[];
+  replyTo?: string;
+}
+
+export interface EmailResult {
+  success: boolean;
+  messageId?: string;
+  error?: string;
+}
