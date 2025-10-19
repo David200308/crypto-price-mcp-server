@@ -237,7 +237,7 @@ class CryptoPriceMCPServer {
     console.error('Crypto Price Checker MCP server running on stdio');
   }
 
-  async runHttp(port: number = 3000) {
+  async runHttp(port: number = 3100) {
     const fastify = require('fastify')({ logger: true });
     
     // Health check endpoint
@@ -360,7 +360,7 @@ const server = new CryptoPriceMCPServer();
 
 // Check if running in HTTP mode (for deployment)
 if (process.env.NODE_ENV === 'production' || process.env.PORT) {
-  const port = parseInt(process.env.PORT || '3000');
+  const port = parseInt(process.env.PORT || '3100');
   server.runHttp(port).catch(console.error);
 } else {
   // Default stdio mode for local development
