@@ -1,5 +1,7 @@
 import { Resend } from 'resend';
-import { EmailConfig, EmailRequest, EmailResult } from './types.js';
+import { EmailConfig, EmailRequest, EmailResult, CryptoPriceAlertParams, GeneralEmailParams } from './types.js';
+import { generateCryptoPriceAlertHtml, generateCryptoPriceAlertText, generateCryptoPriceAlertSubject } from './templates/crypto-price-alert.js';
+import { generateGeneralEmailHtml, generateGeneralEmailText } from './templates/general-email.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -19,6 +21,19 @@ export class EmailService {
     return content
       .replace(/\$\{new Date\(\)\.toLocaleDateString\(\)\}/g, currentDate)
       .replace(/\$\{new Date\(\)\.toLocaleString\(\)\}/g, currentDateTime);
+  }
+
+  /**
+   * Process template content by evaluating template literals and converting markdown
+   */
+  private processTemplateContent(content: string, convertMarkdown: boolean = false): string {
+    let processedContent = this.evaluateTemplateLiterals(content);
+    
+    if (convertMarkdown) {
+      processedContent = this.convertMarkdownToHtml(processedContent);
+    }
+    
+    return processedContent;
   }
 
   private loadConfigFromFile(): EmailConfig {
@@ -158,6 +173,42 @@ export class EmailService {
     }
   }
 
+  private convertMarkdownToHtml(markdown: string): string {
+    return markdown
+      // Headers
+      .replace(/^### (.*$)/gim, '<h3 style="color: #333; margin: 20px 0 10px 0; font-size: 18px;">$1</h3>')
+      .replace(/^## (.*$)/gim, '<h2 style="color: #333; margin: 25px 0 15px 0; font-size: 20px; border-bottom: 2px solid #eee; padding-bottom: 5px;">$1</h2>')
+      .replace(/^# (.*$)/gim, '<h1 style="color: #333; margin: 30px 0 20px 0; font-size: 24px;">$1</h1>')
+      // Bold text
+      .replace(/\*\*(.*?)\*\*/g, '<strong style="font-weight: bold;">$1</strong>')
+      // Lists
+      .replace(/^\d+\.\s+(.*$)/gim, '<li style="margin: 5px 0;">$1</li>')
+      .replace(/^-\s+(.*$)/gim, '<li style="margin: 5px 0;">$1</li>')
+      // Tables
+      .replace(/\|(.+)\|/g, (match, content) => {
+        const cells = content.split('|').map((cell: string) => cell.trim());
+        return `<tr>${cells.map((cell: string) => `<td style="padding: 8px; border: 1px solid #ddd;">${cell}</td>`).join('')}</tr>`;
+      })
+      // Line breaks
+      .replace(/\n\n/g, '</p><p style="margin: 10px 0;">')
+      .replace(/\n/g, '<br>')
+      // Wrap in paragraphs
+      .replace(/^(.*)$/gm, '<p style="margin: 10px 0;">$1</p>')
+      // Clean up empty paragraphs
+      .replace(/<p style="margin: 10px 0;"><\/p>/g, '')
+      // Clean up list items that are now in paragraphs
+      .replace(/<p style="margin: 10px 0;"><li/g, '<li')
+      .replace(/<\/li><\/p>/g, '</li>')
+      // Wrap lists in ul/ol
+      .replace(/(<li[^>]*>.*<\/li>)/gs, (match) => {
+        if (match.includes('1.')) {
+          return `<ol style="margin: 10px 0; padding-left: 20px;">${match}</ol>`;
+        } else {
+          return `<ul style="margin: 10px 0; padding-left: 20px;">${match}</ul>`;
+        }
+      });
+  }
+
   async sendCryptoPriceAlert(
     to: string | string[],
     symbol: string,
@@ -165,58 +216,52 @@ export class EmailService {
     exchange: string,
     additionalInfo?: string
   ): Promise<EmailResult> {
-    const subject = `🚀 Crypto Price Alert: ${symbol} at $${price.toFixed(2)}`;
     const currentTime = new Date().toLocaleString();
     
-    const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
-          .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
-          .content { padding: 30px; }
-          .price-card { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 20px 0; text-align: center; border-left: 4px solid #28a745; }
-          .price { font-size: 32px; font-weight: bold; color: #28a745; margin: 10px 0; }
-          .details { color: #6c757d; margin: 5px 0; }
-          .footer { background: #f8f9fa; padding: 20px; text-align: center; color: #6c757d; font-size: 14px; }
-          .additional-info { background: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #2196f3; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1 style="margin: 0; font-size: 28px;">🚀 Crypto Price Alert</h1>
-          </div>
-          <div class="content">
-            <div class="price-card">
-              <h2 style="margin: 0 0 15px 0; color: #333;">${symbol}</h2>
-              <div class="price">$${price.toFixed(2)}</div>
-              <div class="details">Exchange: ${exchange}</div>
-              <div class="details">Time: ${currentTime}</div>
-            </div>
-            ${additionalInfo ? `<div class="additional-info"><strong>Additional Information:</strong><br>${additionalInfo}</div>` : ''}
-          </div>
-          <div class="footer">
-            This alert was sent by the Crypto Price MCP Server.
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+    // Prepare template parameters
+    const templateParams: CryptoPriceAlertParams = {
+      symbol,
+      price,
+      exchange,
+      currentTime,
+      additionalInfo: additionalInfo ? this.processTemplateContent(additionalInfo, true) : undefined
+    };
+    
+    // Generate email content using templates
+    const subject = generateCryptoPriceAlertSubject(symbol, price);
+    const html = generateCryptoPriceAlertHtml(templateParams);
+    const text = generateCryptoPriceAlertText(templateParams);
 
-    const text = `
-🚀 CRYPTO PRICE ALERT
+    return this.sendEmail({
+      to,
+      subject,
+      html,
+      text,
+    });
+  }
 
-${symbol}: $${price.toFixed(2)}
-Exchange: ${exchange}
-Time: ${currentTime}
-
-${additionalInfo ? `Additional Information:\n${additionalInfo}\n` : ''}
-
-This alert was sent by the Crypto Price MCP Server.
-    `;
+  /**
+   * Send a general email using the general email template
+   */
+  async sendGeneralEmail(
+    to: string | string[],
+    subject: string,
+    title: string,
+    content: string,
+    additionalInfo?: string,
+    footerText?: string
+  ): Promise<EmailResult> {
+    // Prepare template parameters
+    const templateParams: GeneralEmailParams = {
+      title,
+      content: this.processTemplateContent(content, true),
+      additionalInfo: additionalInfo ? this.processTemplateContent(additionalInfo, true) : undefined,
+      footerText
+    };
+    
+    // Generate email content using templates
+    const html = generateGeneralEmailHtml(templateParams);
+    const text = generateGeneralEmailText(templateParams);
 
     return this.sendEmail({
       to,

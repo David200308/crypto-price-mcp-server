@@ -102,3 +102,19 @@ export interface EmailResult {
   messageId?: string;
   error?: string;
 }
+
+// Template parameter types
+export interface CryptoPriceAlertParams {
+  symbol: string;
+  price: number;
+  exchange: string;
+  currentTime: string;
+  additionalInfo?: string;
+}
+
+export interface GeneralEmailParams {
+  title: string;
+  content: string;
+  additionalInfo?: string;
+  footerText?: string;
+}
